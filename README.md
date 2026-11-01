@@ -163,7 +163,9 @@ If the installation stops, run the same command again and it picks up where it l
 
 The dotfiles are cloned from this fork. `DOTFILES_REPO` and `DOTFILES_BRANCH` can override the source;
 keep them the same on retries. A saved installation with a different source is rejected, and an existing
-clone with a different origin or branch is left untouched.
+checkout is verified on every resume, even if cloning is marked complete. Legacy state without source
+metadata is accepted only with a matching checkout. Missing completed checkouts, incomplete clones and
+mismatched sources stop installation for manual inspection; they are never deleted or recloned automatically.
 
 Reboot after the installation completes.
 
@@ -337,8 +339,11 @@ The selection is stored in `$XDG_STATE_HOME/hyprpunk/keyboard-layout` (or `~/.lo
 It also becomes the system keymap through `localectl`, for the SDDM login screen and the TTYs, without asking for a
 password: the installer adds a polkit rule (`keyboard/polkit/`) that lets the session change the keymap, and only that.
 UK uses explicit `localectl --no-convert` calls for XKB `gb` and console `uk`. A failure prints a warning;
-the desktop choice remains saved, but the system keymap must then be checked. The SDDM keymap applies when
-its greeter next starts. `ensure` and argument-free `init` retain the saved profile.
+interactive switching keeps the saved desktop choice, while installer `init` fails so the step can be retried.
+Reselecting the same system XKB layout preserves its custom variant, model and options. Switching layouts
+resets the variant, since variants are layout-specific. Hyprland still uses each profile's basic layout,
+and the UK console still uses `uk`; custom variants are not additional desktop profiles.
+The SDDM keymap applies when its greeter next starts. `ensure` and argument-free `init` retain the saved profile.
 Hyprland, Kitty, and tmux pick up the change immediately. New Zsh and Yazi processes use it on startup;
 an existing Neovim instance can reload its movement mappings with `:KeyboardLayoutReload` (restart Neovim to
 also rebuild plugin-specific mappings such as Snacks Explorer).

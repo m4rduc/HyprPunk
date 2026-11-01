@@ -22,6 +22,18 @@ GRUB question appears, answer **N** on a Limine system. Unknown detection never 
 Re-run the same installer command with the same branch to resume after a failed step; logs and progress
 are in `~/.local/state/hyprpunk/`. Do not switch installation sources midway through a run.
 
+Every resume verifies the existing dotfiles checkout against the configured origin and branch, including
+when the clone step is marked complete. Legacy version-1 state without source metadata can resume only
+with a verified matching checkout; metadata is then recorded. Missing completed checkouts, incomplete
+clones, detached HEADs and mismatched sources stop before installation steps run. Inspect the checkout
+and saved state manually; the installer does not delete or reclone an unverified checkout.
+
+Keyboard initialization must successfully read and apply the system keymap before its installer step is
+marked complete. Fix the reported `localectl` failure and rerun the same installer command to retry.
+Normal desktop switching keeps its warning-only behavior. Reselecting the same system XKB layout now
+preserves a custom variant; switching layouts resets it. This does not add custom variants to Hyprland's
+basic desktop profiles or change the explicit UK console mapping `uk`.
+
 The default source in the installer is `m4rduc/HyprPunk`, branch `master`. The explicit branch setting above
 is necessary while this PR is unmerged. Once merged, a fresh installation can use `master` for both commands.
 
@@ -56,6 +68,11 @@ Checks performed for this change:
 - Generation of all three locales into a temporary directory with `localedef --no-archive`; checks of UK
   currency, number/date/time formats, A4 and measurement settings. System locale files were not changed.
 - Installer prompt/state handling, matching fork/branch clone arguments and rejection of a mismatched clone.
+- Modern and legacy resume state, including already-completed clone steps: matching checkouts resume,
+  while missing, incomplete, detached or mismatched checkouts stop without replacement or state rewrites.
+- Mocked X11, console and status-query failures (and missing `localectl`) prevent completion of keyboard
+  initialization; successful US/UK/French initialization completes the step. Same-layout system XKB
+  variants are preserved and variants are reset when changing layouts.
 - Mocked bootloader detection: Limine and systemd-boot skip even with GRUB tools present; GRUB and unknown
   detection require explicit confirmation; declined prompts, EOF and failed detection default to skip.
 - Interactive system upgrade arguments and failure propagation. Quickshell and Super+U upgrades retain

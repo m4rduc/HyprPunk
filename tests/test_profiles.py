@@ -52,9 +52,12 @@ case "${0##*/}" in
   pgrep | tmux) exit 1 ;;
   localectl)
     if [[ "$1" == status ]]; then
-      printf ' X11 Layout: gb\\n X11 Model: pc105\\n X11 Options: caps:escape\\n'
+      printf ' X11 Layout: %s\\n X11 Model: pc105\\n X11 Options: caps:escape\\n X11 Variant: %s\\n' "${TEST_LAYOUT:-gb}" "${TEST_VARIANT:-}"
+      exit "${TEST_STATUS_FAIL:-0}"
+    elif [[ "$*" == *set-x11-keymap* ]]; then
+      exit "${TEST_X11_FAIL:-${TEST_LOCAL_FAIL:-0}}"
     else
-      exit "${TEST_LOCAL_FAIL:-0}"
+      exit "${TEST_CONSOLE_FAIL:-${TEST_LOCAL_FAIL:-0}}"
     fi ;;
   bootctl)
     printf '%s\\n' "${TEST_BOOT_STATUS:-}"
@@ -68,6 +71,7 @@ case "${0##*/}" in
     fi ;;
   git)
     case "$*" in
+      *'rev-parse --verify HEAD') exit "${TEST_HEAD_FAIL:-0}" ;;
       *'remote get-url origin') printf '%s\\n' "${TEST_ORIGIN:-}" ;;
       *'branch --show-current') printf '%s\\n' "${TEST_BRANCH:-}" ;;
     esac ;;
@@ -139,6 +143,67 @@ esac
         self.assertIn("Warning: the UK console", result.stderr)
         self.assertEqual((self.state / "keyboard-layout").read_text().strip(), "gb")
 
+    def test_keyboard_init_failures_do_not_complete_installer_step(self):
+        (self.home / "Scripts").mkdir()
+        (self.home / "Scripts/keyboard-layoutctl.sh").symlink_to(ROOT / "scripts/Scripts/keyboard-layoutctl.sh")
+        body = '''
+declare -A COMPLETED_STEPS=()
+DOTFILES_REPO=https://github.com/m4rduc/HyprPunk.git
+DOTFILES_BRANCH=feat/uk-keyboard-locale
+DOTFILES_DIR="$HOME/dotfiles"
+LOG_DIR="$HOME/state/hyprpunk"
+STATE_FILE="$LOG_DIR/install.state"
+keyboard_layout=gb locale_language=gb locale_regional=gb
+save_state
+run_step configure_keyboard "Configuring the keyboard" configure_keyboard
+'''
+        state_file = self.state / "install.state"
+        for failure in ("TEST_X11_FAIL", "TEST_CONSOLE_FAIL", "TEST_STATUS_FAIL"):
+            with self.subTest(failure=failure):
+                self.env[failure] = "1"
+                result = self.functions(["save_state", "run_step", "configure_keyboard"], body, ok=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Warning:", result.stderr)
+                self.assertNotIn("completed=configure_keyboard", state_file.read_text())
+                # Normal desktop switching still saves the choice and warns.
+                self.assertIn("Warning:", self.controller("keyboard-layoutctl", "set", "gb").stderr)
+                del self.env[failure]
+        (self.bin / "localectl").unlink()
+        result = self.functions(["save_state", "run_step", "configure_keyboard"], body, ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("completed=configure_keyboard", state_file.read_text())
+
+    def test_keyboard_init_success_completes_installer_step(self):
+        (self.home / "Scripts").mkdir()
+        (self.home / "Scripts/keyboard-layoutctl.sh").symlink_to(ROOT / "scripts/Scripts/keyboard-layoutctl.sh")
+        for profile in LOCALES:
+            self.env["TEST_PROFILE"] = profile
+            self.functions(["save_state", "run_step", "configure_keyboard"], '''
+declare -A COMPLETED_STEPS=()
+DOTFILES_REPO=https://github.com/m4rduc/HyprPunk.git
+DOTFILES_BRANCH=feat/uk-keyboard-locale
+DOTFILES_DIR="$HOME/dotfiles"
+LOG_DIR="$HOME/state/hyprpunk"
+STATE_FILE="$LOG_DIR/install.state"
+keyboard_layout="$TEST_PROFILE" locale_language=gb locale_regional=gb
+run_step configure_keyboard "Configuring the keyboard" configure_keyboard
+''')
+            self.assertIn("completed=configure_keyboard", (self.state / "install.state").read_text())
+
+    def test_system_xkb_variant_preserved_only_for_same_layout(self):
+        for profile, variant in (("us", "intl"), ("gb", "extd"), ("fr", "oss")):
+            self.env.update(TEST_LAYOUT=profile, TEST_VARIANT=variant)
+            for command in ("set", "init"):
+                self.log.write_text("")
+                self.controller("keyboard-layoutctl", command, profile)
+                self.assertIn(f'<set-x11-keymap> <{profile}> <pc105> <{variant}> <caps:escape>', self.log.read_text())
+                if profile == "gb":
+                    self.assertIn('<set-keymap> <uk>', self.log.read_text())
+            other = "us" if profile != "us" else "gb"
+            self.log.write_text("")
+            self.controller("keyboard-layoutctl", "set", other)
+            self.assertIn(f'<set-x11-keymap> <{other}> <pc105> <> <caps:escape>', self.log.read_text())
+
     def test_locale_combinations_and_persistence(self):
         for language, language_locale in LOCALES.items():
             for regional, regional_locale in LOCALES.items():
@@ -190,6 +255,7 @@ assert(locale.language == arg[3] and locale.regional == arg[3])
 declare -A COMPLETED_STEPS=([configure_keyboard]=1)
 DOTFILES_REPO=https://github.com/m4rduc/HyprPunk.git
 DOTFILES_BRANCH=feat/uk-keyboard-locale
+DOTFILES_DIR="$HOME/dotfiles"
 LOG_DIR="$HOME/state/hyprpunk"
 STATE_FILE="$LOG_DIR/install.state"
 keyboard_layout=gb locale_language=gb locale_regional=gb
@@ -207,16 +273,99 @@ load_state
     def test_fork_clone_and_wrong_source_rejected(self):
         defaults = "\n".join(line for line in INSTALLER.splitlines() if line.startswith(("DOTFILES_REPO=", "DOTFILES_BRANCH=")))
         body = defaults + '\nDOTFILES_BRANCH=feat/uk-keyboard-locale\nDOTFILES_DIR="$HOME/dotfiles"\nclone_dotfiles'
-        self.functions(["clone_dotfiles"], body)
+        self.functions(["validate_dotfiles_source", "clone_dotfiles"], body)
         self.assertIn('<clone> <--branch> <feat/uk-keyboard-locale> <https://github.com/m4rduc/HyprPunk.git>', self.log.read_text())
         (self.home / "dotfiles/.git").mkdir(parents=True)
         self.log.write_text("")
         self.env["TEST_ORIGIN"] = "https://github.com/tuconnaisyouknow/HyprPunk.git"
         self.env["TEST_BRANCH"] = "feat/uk-keyboard-locale"
-        result = self.functions(["clone_dotfiles"], body, ok=False)
+        result = self.functions(["validate_dotfiles_source", "clone_dotfiles"], body, ok=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("leaving them untouched", result.stderr)
         self.assertNotIn("rm ", self.log.read_text())
+
+    def test_resume_validates_checkout_before_skipping_clone(self):
+        (self.home / "dotfiles/.git").mkdir(parents=True)
+        marker = self.home / "dotfiles/preserved-work"
+        marker.write_text("keep me")
+        metadata = ("dotfiles_repo=https://github.com/m4rduc/HyprPunk.git\n"
+                    "dotfiles_branch=feat/uk-keyboard-locale\n")
+        body = '''
+declare -A COMPLETED_STEPS=()
+DOTFILES_REPO=https://github.com/m4rduc/HyprPunk.git
+DOTFILES_BRANCH=feat/uk-keyboard-locale
+DOTFILES_DIR="$HOME/dotfiles"
+LOG_DIR="$HOME/state/hyprpunk"
+STATE_FILE="$LOG_DIR/install.state"
+initialize_state
+run_step clone_dotfiles "Downloading the dotfiles" clone_dotfiles
+'''
+        names = ["validate_dotfiles_source", "load_state", "save_state", "initialize_state", "run_step", "clone_dotfiles"]
+        for source in ("", metadata, metadata.splitlines(keepends=True)[0]):
+            for completed in ("", "completed=clone_dotfiles\n"):
+                for case in ("valid", "wrong-repo", "wrong-branch", "detached", "invalid-head"):
+                    with self.subTest(source=source, completed=completed, case=case):
+                        original = "version=1\nkeyboard_layout=gb\nlocale_language=gb\nlocale_regional=gb\n" + source + completed
+                        state_file = self.state / "install.state"
+                        state_file.write_text(original)
+                        self.env.update(TEST_ORIGIN="https://github.com/m4rduc/HyprPunk.git",
+                                        TEST_BRANCH="feat/uk-keyboard-locale", TEST_HEAD_FAIL="0")
+                        if case == "wrong-repo":
+                            self.env["TEST_ORIGIN"] = "https://github.com/tuconnaisyouknow/HyprPunk.git"
+                        elif case == "wrong-branch":
+                            self.env["TEST_BRANCH"] = "master"
+                        elif case == "detached":
+                            self.env["TEST_BRANCH"] = ""
+                        elif case == "invalid-head":
+                            self.env["TEST_HEAD_FAIL"] = "1"
+                        self.log.write_text("")
+                        result = self.functions(names, body, ok=False)
+                        self.assertEqual(result.returncode == 0, case == "valid", result.stderr)
+                        if case == "valid":
+                            self.assertIn(metadata, state_file.read_text())
+                            self.assertIn("remote> <get-url> <origin>", self.log.read_text())
+                            if completed:
+                                self.assertIn("already completed, skipping", result.stdout)
+                        else:
+                            self.assertEqual(state_file.read_text(), original)
+                            self.assertIn("leaving them untouched", result.stderr)
+                        self.assertEqual(marker.read_text(), "keep me")
+                        self.assertNotIn("<clone>", self.log.read_text())
+                        self.assertNotIn("rm ", self.log.read_text())
+
+    def test_resume_missing_or_incomplete_checkout_is_not_replaced(self):
+        metadata = ("dotfiles_repo=https://github.com/m4rduc/HyprPunk.git\n"
+                    "dotfiles_branch=feat/uk-keyboard-locale\n")
+        body = '''
+declare -A COMPLETED_STEPS=()
+DOTFILES_REPO=https://github.com/m4rduc/HyprPunk.git
+DOTFILES_BRANCH=feat/uk-keyboard-locale
+DOTFILES_DIR="$HOME/dotfiles"
+LOG_DIR="$HOME/state/hyprpunk"
+STATE_FILE="$LOG_DIR/install.state"
+initialize_state
+run_step clone_dotfiles "Downloading the dotfiles" clone_dotfiles
+'''
+        names = ["validate_dotfiles_source", "load_state", "save_state", "initialize_state", "run_step", "clone_dotfiles"]
+        for incomplete in (False, True):
+            if incomplete:
+                (self.home / "dotfiles").mkdir()
+            for source in ("", metadata):
+                for completed in ("", "completed=clone_dotfiles\n"):
+                    original = "version=1\nkeyboard_layout=gb\nlocale_language=gb\nlocale_regional=gb\n" + source + completed
+                    state_file = self.state / "install.state"
+                    state_file.write_text(original)
+                    self.log.write_text("")
+                    result = self.functions(names, body, ok=False)
+                    permitted = not incomplete and bool(source) and not completed
+                    self.assertEqual(result.returncode == 0, permitted, result.stderr)
+                    if not permitted:
+                        self.assertEqual(state_file.read_text(), original)
+                        self.assertNotIn("<clone>", self.log.read_text())
+                    self.assertNotIn("rm ", self.log.read_text())
+        # The clone step itself also refuses an incomplete directory, without state.
+        result = self.functions(["validate_dotfiles_source", "clone_dotfiles"], body.split("initialize_state")[0] + "clone_dotfiles", ok=False)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_grub_requires_confirmation_and_skips_other_loaders(self):
         for loader in ("Limine 10.0", "systemd-boot 258", "GRUB 2.14", "n/a", ""):

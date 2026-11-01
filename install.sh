@@ -89,7 +89,7 @@ save_state() {
 }
 
 load_state() {
-  local key value version=""
+  local key value version="" source_repo_seen=false source_branch_seen=false
 
   COMPLETED_STEPS=()
   while IFS='=' read -r key value; do
@@ -100,6 +100,11 @@ load_state() {
          [[ "$key" == dotfiles_branch && "$value" != "$DOTFILES_BRANCH" ]]; then
         echo "Installation source changed. Resume with $key=$value (set DOTFILES_REPO and DOTFILES_BRANCH)." >&2
         return 1
+      fi
+      if [[ "$key" == dotfiles_repo ]]; then
+        source_repo_seen=true
+      else
+        source_branch_seen=true
       fi
       ;;
     keyboard_layout) keyboard_layout="$value" ;;
@@ -125,6 +130,13 @@ load_state() {
     echo "Invalid regional locale in installation state: $locale_regional" >&2
     return 1
   }
+
+  # Check before any completed step can be skipped. Legacy state without source
+  # metadata is accepted only when an existing checkout proves the source.
+  if [[ -e "$DOTFILES_DIR" || -L "$DOTFILES_DIR" || -n "${COMPLETED_STEPS[clone_dotfiles]:-}" ||
+        "$source_repo_seen" == false || "$source_branch_seen" == false ]]; then
+    validate_dotfiles_source || return 1
+  fi
 }
 
 # An interrupted install always resumes: starting over would find its own half-done
@@ -413,20 +425,29 @@ install_oh_my_zsh() {
   rm -f "$HOME/.zshrc"
 }
 
+# Both a resumed install and the clone step use this read-only check. Never repair
+# an unknown or incomplete checkout by deleting it; leave it for manual inspection.
+validate_dotfiles_source() {
+  local repo branch
+  if [[ ! -e "$DOTFILES_DIR/.git" ]] ||
+     ! git -C "$DOTFILES_DIR" rev-parse --verify HEAD &>/dev/null ||
+     ! repo=$(git -C "$DOTFILES_DIR" remote get-url origin) ||
+     ! branch=$(git -C "$DOTFILES_DIR" branch --show-current) ||
+     [[ "$repo" != "$DOTFILES_REPO" || "$branch" != "$DOTFILES_BRANCH" ]]; then
+    echo "Cannot verify dotfiles at $DOTFILES_DIR as $DOTFILES_REPO ($DOTFILES_BRANCH); leaving them untouched." >&2
+    echo "Inspect the checkout and installation state before retrying; nothing will be deleted or recloned automatically." >&2
+    return 1
+  fi
+}
+
 # The dotfiles go straight to ~/.dotfiles, which the fresh system check found empty.
-# A clone that got through is kept, one cut short by an interruption starts over.
 clone_dotfiles() {
-  if [[ -d "$DOTFILES_DIR/.git" ]] && git -C "$DOTFILES_DIR" rev-parse --verify HEAD &>/dev/null; then
-    if [[ "$(git -C "$DOTFILES_DIR" remote get-url origin)" != "$DOTFILES_REPO" ]] ||
-       [[ "$(git -C "$DOTFILES_DIR" branch --show-current)" != "$DOTFILES_BRANCH" ]]; then
-      echo "Existing dotfiles do not match $DOTFILES_REPO ($DOTFILES_BRANCH); leaving them untouched." >&2
-      return 1
-    fi
+  if [[ -e "$DOTFILES_DIR" || -L "$DOTFILES_DIR" ]]; then
+    validate_dotfiles_source || return 1
     echo "The dotfiles are already downloaded."
     return
   fi
 
-  rm -rf -- "$DOTFILES_DIR"
   git clone --branch "$DOTFILES_BRANCH" "$DOTFILES_REPO" "$DOTFILES_DIR"
 }
 
