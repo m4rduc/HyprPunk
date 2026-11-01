@@ -97,7 +97,7 @@ PanelWindow {
     property real clockCenterOffset: bar.islandOsdShown ? 3 : -3
     // The regional formats you picked (locale-profilectl.sh). The calendar's day names
     // and first day of the week follow them, even though the shell keeps its startup locale.
-    readonly property var regionalLocale: Qt.locale(Session.regionalProfile === "us" ? "en_US" : "fr_FR")
+    readonly property var regionalLocale: Qt.locale(Session.regionalLocale.split(".")[0])
 
     // The connected device first, else one NetworkManager is bringing up.
     readonly property var networkDevice: {

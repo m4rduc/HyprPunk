@@ -5,7 +5,8 @@
 
 set -Eeuo pipefail
 
-DOTFILES_REPO="https://github.com/tuconnaisyouknow/HyprPunk.git"
+DOTFILES_REPO="${DOTFILES_REPO:-https://github.com/m4rduc/HyprPunk.git}"
+DOTFILES_BRANCH="${DOTFILES_BRANCH:-master}"
 DOTFILES_DIR="$HOME/.dotfiles"
 LOG_DIR="$HOME/.local/state/hyprpunk"
 LOG_FILE="$LOG_DIR/install-$(date +%Y-%m-%d_%H-%M-%S).log"
@@ -75,6 +76,8 @@ save_state() {
   state_tmp=$(mktemp --tmpdir="$LOG_DIR" install-state.XXXXXX)
   {
     printf 'version=1\n'
+    printf 'dotfiles_repo=%s\n' "$DOTFILES_REPO"
+    printf 'dotfiles_branch=%s\n' "$DOTFILES_BRANCH"
     printf 'keyboard_layout=%s\n' "$keyboard_layout"
     printf 'locale_language=%s\n' "$locale_language"
     printf 'locale_regional=%s\n' "$locale_regional"
@@ -92,6 +95,13 @@ load_state() {
   while IFS='=' read -r key value; do
     case "$key" in
     version) version="$value" ;;
+    dotfiles_repo | dotfiles_branch)
+      if [[ "$key" == dotfiles_repo && "$value" != "$DOTFILES_REPO" ]] ||
+         [[ "$key" == dotfiles_branch && "$value" != "$DOTFILES_BRANCH" ]]; then
+        echo "Installation source changed. Resume with $key=$value (set DOTFILES_REPO and DOTFILES_BRANCH)." >&2
+        return 1
+      fi
+      ;;
     keyboard_layout) keyboard_layout="$value" ;;
     locale_language) locale_language="$value" ;;
     locale_regional) locale_regional="$value" ;;
@@ -103,15 +113,15 @@ load_state() {
     echo "Unsupported installation state version: ${version:-missing}" >&2
     return 1
   }
-  [[ -z "$keyboard_layout" || "$keyboard_layout" == "us" || "$keyboard_layout" == "fr" ]] || {
+  [[ -z "$keyboard_layout" || "$keyboard_layout" == "us" || "$keyboard_layout" == "fr" || "$keyboard_layout" == "gb" ]] || {
     echo "Invalid keyboard layout in installation state: $keyboard_layout" >&2
     return 1
   }
-  [[ "$locale_language" == "us" || "$locale_language" == "fr" ]] || {
+  [[ "$locale_language" == "us" || "$locale_language" == "fr" || "$locale_language" == "gb" ]] || {
     echo "Invalid language locale in installation state: $locale_language" >&2
     return 1
   }
-  [[ "$locale_regional" == "us" || "$locale_regional" == "fr" ]] || {
+  [[ "$locale_regional" == "us" || "$locale_regional" == "fr" || "$locale_regional" == "gb" ]] || {
     echo "Invalid regional locale in installation state: $locale_regional" >&2
     return 1
   }
@@ -254,18 +264,18 @@ require_fresh_system() {
 # The three questions, asked once at the start
 ask_keyboard_layout() {
   while true; do
-    read -rp "Keyboard layout [us/fr] (default: us): " keyboard_layout
+    read -rp "Keyboard layout [us/fr/gb] (gb = UK QWERTY, default: us): " keyboard_layout
     keyboard_layout="${keyboard_layout,,}"
     case "$keyboard_layout" in
     "" | us)
       keyboard_layout="us"
       break
       ;;
-    fr)
+    fr | gb)
       break
       ;;
     *)
-      echo "Invalid layout. Please enter 'fr' or 'us'."
+      echo "Invalid layout. Please enter 'fr', 'us' or 'gb'."
       ;;
     esac
   done
@@ -273,18 +283,18 @@ ask_keyboard_layout() {
 
 ask_locale_language() {
   while true; do
-    read -rp "Interface language [us/fr] (default: us): " locale_language
+    read -rp "Interface language [us/fr/gb] (gb = British English, default: us): " locale_language
     locale_language="${locale_language,,}"
     case "$locale_language" in
     "" | us)
       locale_language="us"
       break
       ;;
-    fr)
+    fr | gb)
       break
       ;;
     *)
-      echo "Invalid language. Please enter 'fr' or 'us'."
+      echo "Invalid language. Please enter 'fr', 'us' or 'gb'."
       ;;
     esac
   done
@@ -292,18 +302,18 @@ ask_locale_language() {
 
 ask_locale_regional() {
   while true; do
-    read -rp "Regional formats [us/fr] (default: us): " locale_regional
+    read -rp "Regional formats [us/fr/gb] (gb = United Kingdom, default: us): " locale_regional
     locale_regional="${locale_regional,,}"
     case "$locale_regional" in
     "" | us)
       locale_regional="us"
       break
       ;;
-    fr)
+    fr | gb)
       break
       ;;
     *)
-      echo "Invalid regional format. Please enter 'fr' or 'us'."
+      echo "Invalid regional format. Please enter 'fr', 'us' or 'gb'."
       ;;
     esac
   done
@@ -330,7 +340,8 @@ install_yay() {
 }
 
 update_system() {
-  sudo pacman -Syyu --noconfirm
+  echo "Review the system upgrade below; installation stops if the upgrade fails."
+  sudo pacman -Syu
 }
 
 install_packages() {
@@ -406,12 +417,17 @@ install_oh_my_zsh() {
 # A clone that got through is kept, one cut short by an interruption starts over.
 clone_dotfiles() {
   if [[ -d "$DOTFILES_DIR/.git" ]] && git -C "$DOTFILES_DIR" rev-parse --verify HEAD &>/dev/null; then
+    if [[ "$(git -C "$DOTFILES_DIR" remote get-url origin)" != "$DOTFILES_REPO" ]] ||
+       [[ "$(git -C "$DOTFILES_DIR" branch --show-current)" != "$DOTFILES_BRANCH" ]]; then
+      echo "Existing dotfiles do not match $DOTFILES_REPO ($DOTFILES_BRANCH); leaving them untouched." >&2
+      return 1
+    fi
     echo "The dotfiles are already downloaded."
     return
   fi
 
   rm -rf -- "$DOTFILES_DIR"
-  git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+  git clone --branch "$DOTFILES_BRANCH" "$DOTFILES_REPO" "$DOTFILES_DIR"
 }
 
 # Link each module into your home. The others (sddm, grub, battery…) are installed
@@ -548,10 +564,10 @@ apply_themes() {
   gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
 }
 
-# Generate both locales the shell can switch between
+# Generate all locales the shell can switch between
 install_locale() {
   local locale
-  for locale in en_US.UTF-8 fr_FR.UTF-8; do
+  for locale in en_US.UTF-8 fr_FR.UTF-8 en_GB.UTF-8; do
     if ! grep -q "^[[:space:]]*${locale}[[:space:]]\\+UTF-8" /etc/locale.gen; then
       sudo sed -i "/^[[:space:]]*#[[:space:]]*${locale}[[:space:]]\\+UTF-8/s/^[[:space:]]*#[[:space:]]*//" /etc/locale.gen
     fi
@@ -568,7 +584,31 @@ install_sddm_theme() {
   "$sddm_script" welcome-to-the-metro
 }
 
-# The boot menu theme, when GRUB is the bootloader
+# bootctl describes the loader that started this boot, not just installed utilities.
+# GRUB/BIOS may not report it, so require the user's confirmation as well. Unknown
+# or unavailable detection never opts in by itself.
+confirm_grub_bootloader() {
+  local loader="" answer
+  if command -v bootctl >/dev/null 2>&1; then
+    loader=$(LC_ALL=C SYSTEMD_COLORS=0 bootctl status 2>/dev/null |
+      sed -n '/^Current Boot Loader:/,/^$/s/^[[:space:]]*Product: //p' || true)
+  fi
+  case "${loader,,}" in
+    *limine*)
+      echo "Limine is the current bootloader, skipping GRUB theme."
+      return 1
+      ;;
+    *grub* | "" | n/a) ;;
+    *)
+      echo "Current bootloader is $loader, skipping GRUB theme."
+      return 1
+      ;;
+  esac
+  read -rp "Does this system boot using GRUB, and should its theme be installed? [y/N]: " answer || return 1
+  [[ "$answer" == y || "$answer" == Y ]]
+}
+
+# The boot menu theme, only for a confirmed GRUB installation
 install_grub_theme() {
   local grub_theme_dir="$DOTFILES_DIR/grub/themes/CyberEXS"
   local grub_theme_target="/boot/grub/themes/CyberEXS"
@@ -576,6 +616,15 @@ install_grub_theme() {
 
   if ! command -v grub-mkconfig >/dev/null 2>&1; then
     echo "grub-mkconfig not found, skipping GRUB theme."
+    return
+  fi
+
+  if ! confirm_grub_bootloader; then
+    echo "GRUB theme skipped."
+    return
+  fi
+  if [[ ! -f /etc/default/grub || ! -f /boot/grub/grub.cfg ]]; then
+    echo "No existing GRUB configuration, skipping GRUB theme."
     return
   fi
 
@@ -670,8 +719,8 @@ main() {
   run_step "ask_locale_language" "Selecting the interface language" ask_locale_language
   run_step "ask_locale_regional" "Selecting regional formats" ask_locale_regional
 
-  # The questions are all behind you, so the rest runs on its own until the reboot
-  # question at the end. Not a step of its own, since a resumed install needs sudo again.
+  # Not a step of its own, since a resumed install needs sudo again. Package upgrades
+  # and optional GRUB theming still ask for confirmation before making changes.
   current_step="Asking for your password"
   printf '\n==> %s\n' "$current_step"
   keep_sudo_alive
@@ -684,6 +733,7 @@ main() {
   run_step "stow_dotfiles" "Linking dotfiles" stow_dotfiles
   run_step "generate_qt_configs" "Generating Qt configuration" generate_qt_configs
   run_step "configure_keyboard" "Configuring the keyboard" configure_keyboard
+  run_step "install_locale" "Installing the locale" install_locale
   run_step "configure_locale_profiles" "Configuring locale profiles" configure_locale_profiles
   run_step "configure_monitors" "Configuring monitors" configure_monitors
   run_step "configure_wallpaper" "Configuring the wallpaper" configure_wallpaper
@@ -691,7 +741,6 @@ main() {
   run_step "set_default_apps" "Setting default applications" set_default_apps
   run_step "install_tmux_plugins" "Installing tmux plugins" install_tmux_plugins
   run_step "apply_themes" "Applying themes" apply_themes
-  run_step "install_locale" "Installing the locale" install_locale
   run_step "install_sddm_theme" "Installing the SDDM theme" install_sddm_theme
   run_step "install_grub_theme" "Installing the GRUB theme" install_grub_theme
   run_step "install_brave_policy" "Installing the Brave policy" install_brave_policy

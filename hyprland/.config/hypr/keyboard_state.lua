@@ -5,6 +5,7 @@ local state = __require("lib.state")
 local layouts = {
   fr = { name = "fr", xkb = "fr", left = "j", down = "k", up = "l", right = "m" },
   us = { name = "us", xkb = "us", left = "h", down = "j", up = "k", right = "l" },
+  gb = { name = "gb", xkb = "gb", left = "h", down = "j", up = "k", right = "l" },
 }
 
 -- US until something else has been picked

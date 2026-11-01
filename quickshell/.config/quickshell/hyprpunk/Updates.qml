@@ -38,7 +38,7 @@ Singleton {
     Process {
         id: upgradeProcess
 
-        command: ["kitty", "-e", "yay", "-Syu", "--noconfirm", "--removemake"]
+        command: ["kitty", "--hold", "-e", "yay", "-Syu", "--removemake"]
         // The current locale, not the one the shell was started with.
         environment: Session.localeEnvironment
         onExited: updates.check()

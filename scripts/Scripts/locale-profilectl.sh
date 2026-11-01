@@ -4,7 +4,7 @@
 # Saved for Hyprland's env.lua, and passed on to systemd and D-Bus so the apps they
 # start follow too. Apps already open keep theirs until restarted.
 #   locale-profilectl.sh get-language | get-regional | list
-#   locale-profilectl.sh set-language <us|fr> | set-regional <us|fr>   from the shell
+#   locale-profilectl.sh set-language <us|fr|gb> | set-regional <us|fr|gb>   from the shell
 #   locale-profilectl.sh init [language] [regional]                    from install.sh
 #   locale-profilectl.sh ensure                                        re-applies the saved ones
 
@@ -16,7 +16,7 @@ LANGUAGE_FILE="$STATE_DIR/locale-language"
 REGIONAL_FILE="$STATE_DIR/locale-regional"
 
 usage() {
-  echo "Usage: $0 {get-language|get-regional|list|set-language <us|fr>|set-regional <us|fr>|init [us|fr] [us|fr]|ensure}"
+  echo "Usage: $0 {get-language|get-regional|list|set-language <us|fr|gb>|set-regional <us|fr|gb>|init [us|fr|gb] [us|fr|gb]|ensure}"
 }
 
 # The saved choice, or the fallback when there's none (English for both)
@@ -27,7 +27,7 @@ read_profile() {
     IFS= read -r profile <"$file" || true
   fi
   case "$profile" in
-  us | fr) printf '%s\n' "$profile" ;;
+  us | fr | gb) printf '%s\n' "$profile" ;;
   *) printf '%s\n' "$fallback" ;;
   esac
 }
@@ -35,6 +35,7 @@ read_profile() {
 profile_locale() {
   case "$1" in
   us) printf 'en_US.UTF-8\n' ;;
+  gb) printf 'en_GB.UTF-8\n' ;;
   fr) printf 'fr_FR.UTF-8\n' ;;
   *) return 2 ;;
   esac
@@ -130,7 +131,7 @@ apply_profiles() {
 case "${1:-}" in
 get-language) read_profile "$LANGUAGE_FILE" us ;;
 get-regional) read_profile "$REGIONAL_FILE" us ;;
-list) printf 'us\nfr\n' ;;
+list) printf 'us\nfr\ngb\n' ;;
 set-language)
   [[ $# -eq 2 ]] || { usage >&2; exit 2; }
   apply_profiles "$2" "$(read_profile "$REGIONAL_FILE" us)"
@@ -141,7 +142,7 @@ set-regional)
   ;;
 init)
   [[ $# -le 3 ]] || { usage >&2; exit 2; }
-  apply_profiles "${2:-us}" "${3:-us}"
+  apply_profiles "${2:-$(read_profile "$LANGUAGE_FILE" us)}" "${3:-$(read_profile "$REGIONAL_FILE" us)}"
   ;;
 ensure)
   apply_profiles "$(read_profile "$LANGUAGE_FILE" us)" "$(read_profile "$REGIONAL_FILE" us)"

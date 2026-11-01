@@ -164,7 +164,7 @@ bind(mainMod .. " + Escape", hl.dsp.exec_cmd(shell .. "session toggle"),
 -- Upkeep: restart what misbehaves, update everything
 bind(mainMod .. " + ALT + Q", hl.dsp.exec_cmd("killall qs ; qs -c hyprpunk"), "Reload Quickshell")
 bind(mainMod .. " + ALT + I", hl.dsp.exec_cmd("killall hypridle ; hypridle"), "Reload Hypridle")
-bind(mainMod .. " + U", hl.dsp.exec_cmd("kitty -e yay -Syu --noconfirm --removemake"), "Update all packages")
+bind(mainMod .. " + U", hl.dsp.exec_cmd("kitty --hold -e yay -Syu --removemake"), "Update all packages")
 
 -------------------
 -- HARDWARE KEYS --
