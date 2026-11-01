@@ -59,7 +59,7 @@ PanelWindow {
     property bool bluetoothPowerPending: false
     // Laptops and desktops alike: power-profiles-daemon always has at least saver and balanced.
     readonly property bool powerProfilesAvailable: powerProfiles.length > 1
-    // Keyboard layout and language settings ("fr" or "us"), saved by the scripts.
+    // Keyboard layout and language settings ("fr", "us" or "gb"), saved by the scripts.
     readonly property string keyboardLayout: Session.keyboardLayout
     readonly property string localeLanguage: Session.languageProfile
     readonly property string localeRegional: Session.regionalProfile
@@ -69,8 +69,12 @@ PanelWindow {
         "locale": "fr_FR.UTF-8"
     }, {
         "id": "us",
-        "name": "English",
+        "name": "English (US)",
         "locale": "en_US.UTF-8"
+    }, {
+        "id": "gb",
+        "name": "English (UK)",
+        "locale": "en_GB.UTF-8"
     }]
     // The time caffeine's countdown is shown at, ticking while the panel is open.
     property real now: Date.now()
@@ -671,14 +675,14 @@ PanelWindow {
                                     onToggled: controlCenter.cyclePowerProfile()
                                 }
 
-                                // A click switches between the AZERTY and QWERTY profiles.
+                                // Cycle through US QWERTY, FR AZERTY and UK QWERTY.
                                 ControlTile {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     icon: "󰌌"
                                     title: "Keyboard"
-                                    subtitle: controlCenter.keyboardLayout === "fr" ? "FR AZERTY" : "US QWERTY"
-                                    onToggled: Quickshell.execDetached([Quickshell.env("HOME") + "/Scripts/keyboard-layoutctl.sh", "set", controlCenter.keyboardLayout === "fr" ? "us" : "fr"])
+                                    subtitle: controlCenter.keyboardLayout === "fr" ? "FR AZERTY" : controlCenter.keyboardLayout === "gb" ? "UK QWERTY" : "US QWERTY"
+                                    onToggled: Quickshell.execDetached([Quickshell.env("HOME") + "/Scripts/keyboard-layoutctl.sh", "toggle"])
                                 }
 
                             }

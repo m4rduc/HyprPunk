@@ -10,6 +10,10 @@ local layouts = {
     name = "us", left = "h", down = "j", up = "k", right = "l", extra = "m",
     pane_left = "<C-h>", pane_down = "<C-j>", pane_up = "<C-k>", pane_right = "<C-l>",
   },
+  gb = {
+    name = "gb", left = "h", down = "j", up = "k", right = "l", extra = "m",
+    pane_left = "<C-h>", pane_down = "<C-j>", pane_up = "<C-k>", pane_right = "<C-l>",
+  },
 }
 
 -- US until something else has been picked

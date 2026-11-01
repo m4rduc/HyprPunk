@@ -131,7 +131,7 @@ minutes with a soft rim. Switch between them live from the control center's Disp
 > [!CAUTION]
 > HyprPunk only installs on a **fresh minimal Arch Linux** installation, with nothing else set up yet.
 >
-> It takes over your user configuration, sets up SDDM and GRUB, installs its packages, and enables its services.
+> It takes over your user configuration, sets up SDDM and optionally themes GRUB, installs its packages, and enables its services.
 > So it checks first, and stops without changing anything if it finds configs it would take over (like
 > `~/.config/hypr` or `~/.dotfiles`), another login screen, or another desktop. Nothing is backed up, apart from
 > `/etc/default/grub`, kept as `/etc/default/grub.bak`.
@@ -142,25 +142,36 @@ minutes with a soft rim. Switch between them live from the control center's Disp
 - A user account in the `wheel` group with `sudo` working. Run the installer as that user, not as root.
 - An internet connection. The dotfiles alone weigh about 500 MB to download, mostly the screenshots, wallpapers and
   login screen videos, and the packages come on top.
-- GRUB is optional: its theme is skipped with any other bootloader.
+- GRUB is optional: detected Limine and other non-GRUB loaders skip its theme. Otherwise the installer requires
+  confirmation that GRUB boots this system, plus existing GRUB configuration. The default is to skip.
 
 ### ▶️ Run it
 
+For the **unmerged UK compatibility branch**, use the [branch installation instructions](docs/uk-compatibility.md).
+After merging into this fork's `master`, use:
+
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/tuconnaisyouknow/HyprPunk/refs/heads/master/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/m4rduc/HyprPunk/refs/heads/master/install.sh)
 ```
 
 The script asks for the keyboard layout, interface language, and regional formats first, then your password once.
-After that it runs on its own until it offers to reboot, so you can leave it during the long package builds. Left empty, the
-answers give a US layout and English for both the interface and the formats (`en_US.UTF-8`). English and French
-(`fr_FR.UTF-8`) are both generated during installation, so you can switch later. If the installation stops, run the
-same command again and it picks up where it left off.
+Review the interactive system upgrade; optional GRUB theming and the final reboot also ask for confirmation.
+Left empty, the answers give a US layout and English for both the interface and the formats (`en_US.UTF-8`).
+Choose `gb` for UK QWERTY, British English and UK regional formats. All three locales (`en_US.UTF-8`,
+`en_GB.UTF-8`, `fr_FR.UTF-8`) are generated before applying the selected profiles, so you can switch later.
+If the installation stops, run the same command again and it picks up where it left off.
+
+The dotfiles are cloned from this fork. `DOTFILES_REPO` and `DOTFILES_BRANCH` can override the source;
+keep them the same on retries. A saved installation with a different source is rejected, and an existing
+checkout is verified on every resume, even if cloning is marked complete. Legacy state without source
+metadata is accepted only with a matching checkout. Missing completed checkouts, incomplete clones and
+mismatched sources stop installation for manual inspection; they are never deleted or recloned automatically.
 
 Reboot after the installation completes.
 
 > [!NOTE]
-> Only two keyboard layouts are supported, **QWERTY US** and **AZERTY FR**, and only two languages and regional
-> formats, **English (`en_US`)** and **French (`fr_FR`)**. Other layouts and locales aren't handled.
+> Supported keyboard layouts are **QWERTY US**, **QWERTY UK** and **AZERTY FR**. Supported languages and regional
+> formats are **US English (`en_US`)**, **British English (`en_GB`)** and **French (`fr_FR`)**.
 
 ### 📦 What gets installed
 
@@ -302,12 +313,13 @@ Most top-level configuration directories are GNU Stow modules that symlink into 
 ## ⌨️ Keyboard Layout
 
 > [!NOTE]
-> Only **AZERTY FR** and **QWERTY US** are supported. Any other layout would leave the Vim-style keys in the wrong place.
+> **AZERTY FR**, **QWERTY US** and **QWERTY UK** are supported.
 
-The installer offers two keyboard profiles:
+The installer offers three keyboard profiles:
 
 - `FR` — AZERTY layout with Vim-style movements remapped from `h j k l` to `j k l m`.
 - `US` — QWERTY layout with the standard `h j k l` Vim-style movements.
+- `GB` — UK QWERTY with the same `h j k l` movements, XKB layout `gb` and console keymap `uk`.
 
 `US` is the default when no profile has been selected yet or when the installer prompt is left empty.
 
@@ -316,11 +328,22 @@ The active profile can be changed later from the command line:
 ```bash
 ~/Scripts/keyboard-layoutctl.sh set us
 ~/Scripts/keyboard-layoutctl.sh set fr
+~/Scripts/keyboard-layoutctl.sh set gb
 ```
+
+The control center's Keyboard tile cycles US → FR → UK → US. On a UK ISO keyboard, Shift+3 gives `£`,
+Shift+2 gives `"`, Shift+' gives `@`, the key beside Enter gives `#`, and the key beside left Shift gives
+`\` or, with Shift, `|`. Existing shortcuts retain their keys, including `Ctrl+'` for clipboard history.
 
 The selection is stored in `$XDG_STATE_HOME/hyprpunk/keyboard-layout` (or `~/.local/state/hyprpunk/keyboard-layout`).
 It also becomes the system keymap through `localectl`, for the SDDM login screen and the TTYs, without asking for a
 password: the installer adds a polkit rule (`keyboard/polkit/`) that lets the session change the keymap, and only that.
+UK uses explicit `localectl --no-convert` calls for XKB `gb` and console `uk`. A failure prints a warning;
+interactive switching keeps the saved desktop choice, while installer `init` fails so the step can be retried.
+Reselecting the same system XKB layout preserves its custom variant, model and options. Switching layouts
+resets the variant, since variants are layout-specific. Hyprland still uses each profile's basic layout,
+and the UK console still uses `uk`; custom variants are not additional desktop profiles.
+The SDDM keymap applies when its greeter next starts. `ensure` and argument-free `init` retain the saved profile.
 Hyprland, Kitty, and tmux pick up the change immediately. New Zsh and Yazi processes use it on startup;
 an existing Neovim instance can reload its movement mappings with `:KeyboardLayoutReload` (restart Neovim to
 also rebuild plugin-specific mappings such as Snacks Explorer).
@@ -348,19 +371,26 @@ kb_layout = keyboard.xkb
 ### 🌍 Locale profiles
 
 The interface language (`LANG` and `LC_MESSAGES`) and regional formats (the other `LC_*` categories) are independent,
-and each is either English (`us`, `en_US.UTF-8`) or French (`fr`, `fr_FR.UTF-8`), the only two locales installed.
-They can be changed after installation from the command line:
+and each can be US English (`us`, `en_US.UTF-8`), British English (`gb`, `en_GB.UTF-8`) or French
+(`fr`, `fr_FR.UTF-8`). They can be changed independently in the control center or from the command line:
 
 ```bash
 ~/Scripts/locale-profilectl.sh set-language us
 ~/Scripts/locale-profilectl.sh set-language fr
+~/Scripts/locale-profilectl.sh set-language gb
 ~/Scripts/locale-profilectl.sh set-regional us
 ~/Scripts/locale-profilectl.sh set-regional fr
+~/Scripts/locale-profilectl.sh set-regional gb
 ```
 
 The profiles are stored in `$XDG_STATE_HOME/hyprpunk/locale-language` and `locale-regional`. Hyprland, D-Bus, and the
 systemd user environment are refreshed immediately for newly started applications; already running applications need
 to be restarted.
+
+British regional formats supply day/month/year dates, 24-hour locale time, GBP (`£`), a decimal point and
+comma thousands separator, A4 paper and the locale's metric measurement setting. The calendar uses British
+English and a Monday-first week. These are desktop session profiles; the base installation still owns the
+system locale, time zone and early-boot keyboard configuration.
 
 ---
 

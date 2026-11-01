@@ -5,6 +5,7 @@ local state = __require("lib.state")
 local locales = {
   fr = "fr_FR.UTF-8",
   us = "en_US.UTF-8",
+  gb = "en_GB.UTF-8",
 }
 
 local function read_profile(name, fallback)

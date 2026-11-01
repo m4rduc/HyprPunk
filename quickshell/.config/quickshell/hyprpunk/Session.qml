@@ -13,13 +13,13 @@ import Quickshell.Io
 Singleton {
     id: session
 
-    // "us" or "fr".
+    // "us", "gb" or "fr".
     property string languageProfile: "us"
     property string regionalProfile: "us"
     // "classic" or "liquid", the lock screen clock's glass. Switching it restyles every
     // glass surface on the spot, no restart needed.
     property string glassStyle: "classic"
-    // "us" or "fr", whose Vim keys the panels follow (h/l, or j/m on AZERTY).
+    // "us", "gb" or "fr", whose Vim keys the panels follow (h/l, or j/m on AZERTY).
     property string keyboardLayout: "us"
     // The wallpaper's path, empty until known.
     property string wallpaper: ""
@@ -46,7 +46,7 @@ Singleton {
     readonly property string cacheDir: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/hyprpunk"
 
     function localeOf(profile) {
-        return profile === "fr" ? "fr_FR.UTF-8" : "en_US.UTF-8";
+        return profile === "fr" ? "fr_FR.UTF-8" : profile === "gb" ? "en_GB.UTF-8" : "en_US.UTF-8";
     }
 
     function quoted(argument) {

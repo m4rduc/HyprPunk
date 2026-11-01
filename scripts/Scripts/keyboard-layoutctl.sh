@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Switches between the US and French layouts, and moves every app's Vim keys with it:
+# Switches between the US, UK and French layouts, and moves every app's Vim keys with it:
 # hjkl on QWERTY, jklm on AZERTY so they stay under the right hand.
 # Hyprland, Neovim and zsh read the layout themselves; tmux, kitty, less and yazi get
 # small generated files in ~/.local/state/hyprpunk/keyboard.
 #   keyboard-layoutctl.sh get | list
-#   keyboard-layoutctl.sh set <fr|us> | toggle   from the shell
-#   keyboard-layoutctl.sh init [fr|us]           from install.sh, through sudo
+#   keyboard-layoutctl.sh set <fr|us|gb> | toggle   from the shell
+#   keyboard-layoutctl.sh init [fr|us|gb]           from install.sh, through sudo
 #   keyboard-layoutctl.sh ensure                 rewrites the generated files only
 
 set -euo pipefail
@@ -19,7 +19,7 @@ SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 DOTFILES_DIR="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
 
 usage() {
-  echo "Usage: $0 {get|list|set <fr|us>|toggle|init [fr|us]|ensure}"
+  echo "Usage: $0 {get|list|set <fr|us|gb>|toggle|init [fr|us|gb]|ensure}"
 }
 
 get_layout() {
@@ -28,7 +28,7 @@ get_layout() {
     IFS= read -r layout <"$STATE_FILE" || true
   fi
   case "$layout" in
-    fr|us) printf '%s\n' "$layout" ;;
+    fr|us|gb) printf '%s\n' "$layout" ;;
     *) printf 'us\n' ;;
   esac
 }
@@ -135,35 +135,52 @@ reload_apps() {
   fi
 }
 
-system_field() {
-  localectl status 2>/dev/null | sed -n "s/^ *X11 $1: //p"
-}
-
 # The same layout for the login screen and the TTYs, keeping the keyboard's model and
 # options. No password thanks to the polkit rule in keyboard/polkit, or through sudo
-# when the installer asks ($2 = sudo).
+# when the installer asks ($2 = sudo). Failures stop init; interactive callers keep
+# their saved desktop choice and warn instead.
 apply_system_layout() {
-  local layout="$1" prefix=() model options
+  local layout="$1" prefix=() conversion=() status model options variant="" failed=0
   [[ "${2:-}" == sudo ]] && prefix=(sudo)
-  command -v localectl >/dev/null 2>&1 || return 0
-  [[ "$(system_field Layout)" == "$layout" ]] && return 0
-  model="$(system_field Model)"
-  options="$(system_field Options)"
-  if ! "${prefix[@]}" localectl set-x11-keymap "$layout" "${model:-pc105}" "" "$options"; then
-    echo "Warning: the login screen and TTY keymap was not changed." >&2
+  if ! command -v localectl >/dev/null 2>&1 || ! status=$(LC_ALL=C localectl status 2>/dev/null); then
+    echo "Warning: cannot read the system keymap; the login screen and TTY keymap was not changed." >&2
+    return 1
   fi
+  model=$(sed -n 's/^ *X11 Model: //p' <<<"$status")
+  options=$(sed -n 's/^ *X11 Options: //p' <<<"$status")
+  # Keep a custom system XKB variant when reselecting its layout. Variants belong
+  # to a specific layout, so do not carry them across a switch to another one.
+  if [[ "$(sed -n 's/^ *X11 Layout: //p' <<<"$status")" == "$layout" ]]; then
+    variant=$(sed -n 's/^ *X11 Variant: //p' <<<"$status")
+  fi
+  # XKB calls the UK layout gb; kbd calls it uk. Set both explicitly, without
+  # the console-to-X11 conversion replacing the chosen XKB model or options.
+  [[ "$layout" == gb ]] && conversion=(--no-convert)
+  if ! "${prefix[@]}" localectl "${conversion[@]}" set-x11-keymap "$layout" "${model:-pc105}" "$variant" "$options"; then
+    echo "Warning: the login screen and TTY keymap was not changed." >&2
+    failed=1
+  fi
+  if [[ "$layout" == gb ]] && ! "${prefix[@]}" localectl --no-convert set-keymap uk; then
+    echo "Warning: the UK console keymap was not changed." >&2
+    failed=1
+  fi
+  return "$failed"
 }
 
 apply_layout() {
   local layout="$1"
   case "$layout" in
-    fr|us) ;;
+    fr|us|gb) ;;
     *) echo "Unsupported keyboard layout: $layout" >&2; exit 2 ;;
   esac
 
   mkdir -p "$STATE_DIR" "$GENERATED_DIR"
   generate_common "$layout"
-  "generate_$layout"
+  if [[ "$layout" == fr ]]; then
+    generate_fr
+  else
+    generate_us
+  fi
   printf '%s\n' "$layout" >"$STATE_FILE.tmp.$$"
   mv -f "$STATE_FILE.tmp.$$" "$STATE_FILE"
   reload_apps
@@ -172,23 +189,23 @@ apply_layout() {
 
 case "${1:-}" in
   get) get_layout ;;
-  list) printf 'us\nfr\n' ;;
+  list) printf 'us\nfr\ngb\n' ;;
   set)
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }
     apply_layout "$2"
-    apply_system_layout "$2"
+    apply_system_layout "$2" || true
     ;;
   toggle)
-    if [[ "$(get_layout)" == "fr" ]]; then
-      apply_layout us
-    else
-      apply_layout fr
-    fi
-    apply_system_layout "$(get_layout)"
+    case "$(get_layout)" in
+      us) apply_layout fr ;;
+      fr) apply_layout gb ;;
+      gb) apply_layout us ;;
+    esac
+    apply_system_layout "$(get_layout)" || true
     ;;
   init)
-    apply_layout "${2:-us}"
-    apply_system_layout "${2:-us}" sudo
+    apply_layout "${2:-$(get_layout)}"
+    apply_system_layout "$(get_layout)" sudo
     ;;
   ensure) apply_layout "$(get_layout)" ;;
   *) usage >&2; exit 2 ;;
